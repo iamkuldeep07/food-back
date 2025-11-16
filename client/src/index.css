@@ -1,0 +1,25 @@
+@import "tailwindcss";
+
+.glass {
+  background: rgba(255,255,255,0.50);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(255,255,255,0.18);
+  box-shadow: 0 6px 18px rgba(16,24,40,0.06);
+}
+
+/* Soft gradient backgrounds for cards */
+.card-glow {
+  background: linear-gradient(135deg, rgba(255,255,255,0.55), rgba(255,255,255,0.35));
+  border: 1px solid rgba(255,255,255,0.12);
+  backdrop-filter: blur(6px);
+}
+
+/* Accent radial glow */
+.accent-glow {
+  box-shadow: 0 10px 30px rgba(59,130,246,0.10);
+}
+
+/* small helpers */
+.kicker { font-size: .75rem; color: #64748b; }
+.h2 { font-size: 1.25rem; font-weight: 700; color: #0f172a; }
