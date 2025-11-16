@@ -1,138 +1,175 @@
-// src/pages/StudentDashboard.jsx
 import React, { useEffect, useState } from "react";
 import API from "../api";
 import FeedbackForm from "../components/FeedbackForm";
 import MyFeedback from "../components/MyFeedback";
 import { useAuthStore } from "../context/authStore";
 import { useNavigate } from "react-router-dom";
-import { Utensils, LogOut, PenSquare, RefreshCw } from "lucide-react";
+import { motion } from "framer-motion";
 
 export default function StudentDashboard() {
   const [todayMenu, setTodayMenu] = useState(null);
   const [showForm, setShowForm] = useState(false);
+  const [busyMeal, setBusyMeal] = useState(null);
+  const [refreshTrigger, setRefreshTrigger] = useState(0); // increments to force child refresh
 
   const navigate = useNavigate();
   const logout = useAuthStore((s) => s.logout);
   const user = useAuthStore((s) => s.user);
+  const userId = user?.id || user?._id;
 
-  // Fetch today's menu
+  const fetchToday = async () => {
+    try {
+      const { data } = await API.get("/menu/today");
+      setTodayMenu(data);
+    } catch (err) {
+      console.error("fetchToday:", err?.response?.data || err.message);
+    }
+  };
+
   useEffect(() => {
-    const fetchMenu = async () => {
-      try {
-        const { data } = await API.get("/menu/today");
-        setTodayMenu(data);
-      } catch (err) {
-        console.error(err);
-      }
-    };
-    fetchMenu();
+    fetchToday();
+    // optional polling for live counts
+    const t = setInterval(fetchToday, 30000);
+    return () => clearInterval(t);
   }, []);
 
-  return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50 p-6">
-      <div className="max-w-4xl mx-auto">
+  // returns "like"|"dislike"|null
+  const myMealReaction = (meal) => {
+    if (!todayMenu || !userId) return null;
+    const uid = String(userId);
+    const likeArr = todayMenu[`${meal}Likes`] || [];
+    const dislikeArr = todayMenu[`${meal}Dislikes`] || [];
+    if (likeArr.some((x) => String(x.userId) === uid)) return "like";
+    if (dislikeArr.some((x) => String(x.userId) === uid)) return "dislike";
+    return null;
+  };
 
-        {/* HEADER */}
-        <header className="bg-white/80 backdrop-blur-sm shadow-md border border-gray-200 p-6 rounded-2xl flex justify-between items-center mb-8">
+  const reactToMeal = async (meal, type) => {
+    if (!todayMenu || !userId) {
+      alert("Please login to react.");
+      return;
+    }
+    setBusyMeal(meal);
+    try {
+      await API.post("/menu/meal-react", { menuId: todayMenu._id, meal, reaction: type });
+      // Refresh local menu counts
+      await fetchToday();
+      // also tell MyFeedback (and any child listening) to refresh if needed
+      setRefreshTrigger((n) => n + 1);
+    } catch (err) {
+      console.error("reactToMeal error:", err?.response?.data || err.message);
+      alert(err?.response?.data?.message || "Reaction failed");
+    } finally {
+      setBusyMeal(null);
+    }
+  };
+
+  // Proper refresh: update today's menu AND increment refreshTrigger so children reload
+  const handleRefresh = async () => {
+    await fetchToday();
+    setRefreshTrigger((n) => n + 1);
+  };
+
+  const MealCard = ({ mealKey, label }) => {
+    const likes = todayMenu?.[`${mealKey}Likes`]?.length || 0;
+    const dislikes = todayMenu?.[`${mealKey}Dislikes`]?.length || 0;
+    const reacted = myMealReaction(mealKey);
+
+    return (
+      <div className="p-4 border rounded-lg shadow-sm bg-white">
+        <div className="flex items-start justify-between">
           <div>
-            <h1 className="text-3xl font-bold bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent">
-              Food-back Hub
-            </h1>
-            <p className="text-gray-600 text-sm">
-              Welcome, <span className="font-semibold">{user?.name}</span>
-            </p>
+            <div className="font-semibold">{label}</div>
+            <div className="text-gray-700 mt-1">{todayMenu?.[mealKey] ?? "—"}</div>
           </div>
 
-          <div className="flex gap-3">
-            <button
-              className="px-4 py-2 rounded-xl bg-gradient-to-r from-indigo-500 to-blue-600 text-white shadow hover:shadow-lg transition"
-              onClick={() => navigate("/admin")}
-            >
-              Admin
-            </button>
+          <div className="text-right">
+            <div className="text-xs text-gray-500">Likes / Dislikes</div>
+            <div className="mt-2 flex items-center gap-2">
+              <motion.button
+                whileTap={{ scale: 0.95 }}
+                onClick={() => reactToMeal(mealKey, "like")}
+                disabled={busyMeal === mealKey}
+                className={`px-3 py-1 rounded-lg ${
+                  reacted === "like" ? "bg-green-600 text-white" : "bg-green-100 text-green-800"
+                }`}
+              >
+                👍 {likes}
+              </motion.button>
 
-            <button
-              className="p-3 rounded-xl bg-red-500 text-white shadow hover:bg-red-600"
-              onClick={logout}
-            >
-              <LogOut size={18} />
-            </button>
+              <motion.button
+                whileTap={{ scale: 0.95 }}
+                onClick={() => reactToMeal(mealKey, "dislike")}
+                disabled={busyMeal === mealKey}
+                className={`px-3 py-1 rounded-lg ${
+                  reacted === "dislike" ? "bg-red-600 text-white" : "bg-red-100 text-red-800"
+                }`}
+              >
+                👎 {dislikes}
+              </motion.button>
+            </div>
+
+            <div className="text-xs text-gray-500 mt-2">
+              {reacted ? <>You reacted: <strong>{reacted}</strong></> : "No reaction yet"}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div className="min-h-screen p-6 bg-gradient-to-br from-slate-50 to-blue-50">
+      <div className="max-w-4xl mx-auto">
+        <header className="flex justify-between items-center mb-6">
+          <div>
+            <h1 className="text-3xl font-bold">Food-back Hub</h1>
+            <p className="text-xs text-gray-500 mt-1">Signed in as <strong>{user?.name ?? "Student"}</strong></p>
+          </div>
+
+          <div className="flex gap-2">
+            <button className="p-2 border rounded" onClick={() => navigate("/admin")}>Admin</button>
+            <button className="p-2 bg-red-500 text-white rounded" onClick={logout}>Logout</button>
           </div>
         </header>
 
-        {/* TODAY'S MENU */}
-        <section className="bg-white/70 backdrop-blur-md border border-gray-200 p-6 rounded-2xl shadow-lg mb-8">
-          <h2 className="text-xl font-semibold text-gray-800 mb-4 flex items-center gap-2">
-            <Utensils className="text-blue-600" size={20} />
-            Today's Menu
-          </h2>
-
-          {todayMenu ? (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-
-              {[
-                ["Breakfast", todayMenu.breakfast, "from-yellow-50 to-yellow-100"],
-                ["Lunch", todayMenu.lunch, "from-green-50 to-green-100"],
-                ["Snacks", todayMenu.snacks || "—", "from-purple-50 to-purple-100"],
-                ["Dinner", todayMenu.dinner, "from-blue-50 to-blue-100"],
-              ].map(([label, value, bg], i) => (
-                <div
-                  key={i}
-                  className={`p-4 rounded-xl border bg-gradient-to-br ${bg} shadow-sm hover:shadow-md transition-all`}
-                >
-                  <h3 className="font-semibold text-gray-800">{label}</h3>
-                  <p className="text-gray-700 mt-1">{value}</p>
-                </div>
-              ))}
-
+        <section className="bg-white p-6 rounded-xl shadow mb-6">
+          <div className="flex justify-between items-start">
+            <div>
+              <h2 className="text-xl font-semibold">Today's Menu</h2>
+              <p className="text-sm text-gray-500">React to each meal</p>
             </div>
-          ) : (
-            <p className="text-gray-500">No menu available for today.</p>
-          )}
+
+            <div className="text-right text-sm text-gray-500 space-y-1">
+              <div>Breakfast: 👍 {todayMenu?.breakfastLikes?.length || 0} / 👎 {todayMenu?.breakfastDislikes?.length || 0}</div>
+              <div>Lunch: 👍 {todayMenu?.lunchLikes?.length || 0} / 👎 {todayMenu?.lunchDislikes?.length || 0}</div>
+              <div>Snacks: 👍 {todayMenu?.snacksLikes?.length || 0} / 👎 {todayMenu?.snacksDislikes?.length || 0}</div>
+              <div>Dinner: 👍 {todayMenu?.dinnerLikes?.length || 0} / 👎 {todayMenu?.dinnerDislikes?.length || 0}</div>
+            </div>
+          </div>
+
+          <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+            <MealCard mealKey="breakfast" label="Breakfast" />
+            <MealCard mealKey="lunch" label="Lunch" />
+            <MealCard mealKey="snacks" label="Snacks" />
+            <MealCard mealKey="dinner" label="Dinner" />
+          </div>
         </section>
 
-        {/* ACTION BUTTONS */}
-        <div className="flex gap-4 mb-8">
-          <button
-            onClick={() => setShowForm(!showForm)}
-            className="flex items-center gap-2 px-5 py-2 rounded-xl bg-blue-600 text-white font-medium shadow hover:bg-blue-700 transition"
-          >
-            <PenSquare size={18} />
-            {showForm ? "Close Form" : "Give Feedback"}
-          </button>
-
-          <button
-            onClick={() => window.location.reload()}
-            className="flex items-center gap-2 px-4 py-2 border border-gray-300 rounded-xl bg-white shadow hover:bg-gray-50 transition"
-          >
-            <RefreshCw size={18} />
-            Refresh
-          </button>
+        <div className="flex gap-3 mb-4">
+          <button className="p-2 bg-blue-600 text-white rounded" onClick={() => setShowForm(!showForm)}>Give Feedback</button>
         </div>
 
-        {/* FEEDBACK FORM */}
-        {showForm && (
-          <div className="mb-8 bg-white/80 backdrop-blur-md p-6 rounded-2xl shadow-lg border border-gray-200">
-            <FeedbackForm
-              onDone={() => setShowForm(false)}
-            />
-          </div>
-        )}
+        {showForm && <FeedbackForm onDone={() => {
+          // after feedback submitted close form and refresh both lists
+          setShowForm(false);
+          fetchToday();
+          setRefreshTrigger((n) => n + 1);
+        }} />}
 
-        {/* MY FEEDBACK SECTION */}
-        <div className="bg-white/70 backdrop-blur-md border border-gray-200 p-6 rounded-2xl shadow-lg mb-14">
-          <MyFeedback />
-        </div>
-
+        {/* pass refreshTrigger so MyFeedback refetches when this increments */}
+        <MyFeedback refresh={refreshTrigger} />
       </div>
-
-      {/* FLOATING FEEDBACK BUTTON (Mobile) */}
-      <button
-        onClick={() => setShowForm(!showForm)}
-        className="md:hidden fixed bottom-6 right-6 bg-gradient-to-r from-blue-600 to-indigo-600 text-white p-4 rounded-full shadow-xl hover:scale-105 transition transform"
-      >
-        <PenSquare size={22} />
-      </button>
     </div>
   );
 }
